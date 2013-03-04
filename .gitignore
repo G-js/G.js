@@ -1,0 +1,10 @@
+.DS_Store
+.svn
+src/g.js
+src/config.js
+node_modules
+build
+src/app/
+src/widget/imageUploader/test/upload/
+src/as/uploader/
+temp/*
