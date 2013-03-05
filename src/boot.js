@@ -1,5 +1,4 @@
 var G = this.G = {};
-if (G == 1)
 
 (function () {
     var config = {};
