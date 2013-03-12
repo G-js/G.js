@@ -1,5 +1,4 @@
 var G = this.G = {};
-if (G == 1)
 
 (function () {
     var config = {};
@@ -367,7 +366,10 @@ G.when = function ( defers ){
     return ret.promise();
 };
 })( G );
-/******** Loader ********/
+// Thanks To:
+//      - My girlfriend
+//      - http://github.com/seajs/seajs
+
 (function ( global, G, util ) {
     var STATUS = {
         'ERROR'     : -2,   // The module throw an error while compling
