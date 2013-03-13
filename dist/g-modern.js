@@ -747,9 +747,7 @@ G.when = function ( defers ){
             return m.status < STATUS.FETCHING;
         });
 
-        toFetch.forEach( function ( dep ) {
-            Module.fetch( dep );
-        } );
+        toFetch.forEach( Module.fetch );
 
         return modules;
     }
