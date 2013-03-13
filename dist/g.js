@@ -1635,9 +1635,7 @@ G.when = function ( defers ){
         });
 
         toFetch.forEach( function ( dep ) {
-            setTimeout(function () {
-                Module.fetch( dep );
-            }, 0);
+            Module.fetch( dep );
         } );
 
         return modules;
