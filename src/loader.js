@@ -392,8 +392,30 @@
         }
         if ( config.version ) {
             var v = Date.now();
-            v = config.version[id] || parseInt( ( v - ( v%72E5 ) ) / 1000, 10 );
-            url = id.replace(/(\.(js|css|html?|swf|gif|png|jpe?g))$/i, '-' + v +"$1");
+
+            if (config.version[id]) {
+                v = config.version[id];
+            } else {
+                v -= v % config.cacheExpire;
+            }
+            if (config.versionTemplate) {
+                var m = /(\.(js|css|html?|swf|gif|png|jpe?g))$/i.exec(id);
+                if (!m) {
+                    m = m[0];
+                } else {
+                    m = '.js';
+                }
+
+                url = config.versionTemplate({
+                    version: v,
+                    url: {
+                        href: id,
+                        ext: m
+                    }
+                });
+            } else {
+                url = id.replace(/(\.(js|css|html?|swf|gif|png|jpe?g))$/i, '-' + v +"$1");
+            }
         }
 
         return util.path.realpath( G.config('baseUrl') + url );
