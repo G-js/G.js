@@ -20,9 +20,10 @@
                  doc.getElementsByTagName('head')[0] ||
                  doc.documentElement;
     var config = G.config();
+    var moduleCount = 0;
 
     function use ( deps, cb ) {
-        var module = Module( util.guid( 'module' ) );
+        var module = Module( 'module_' + (moduleCount++) );
         var id     = module.id;
         module.isAnonymous = true;
         deps = resolveDeps( deps, this.context );
@@ -289,7 +290,7 @@
     // `onload` event is supported in WebKit since 535.23
     // Ref:
     //  - https://bugs.webkit.org/show_activity.cgi?id=38995
-    var isOldWebKit = util.ua.webkit && util.ua.webkit < 536;
+    var isOldWebKit = +navigator.userAgent.replace(/.*AppleWebKit\/(\d+)\..*/, "$1") < 536;
 
     // `onload/onerror` event is supported since Firefox 9.0
     // Ref:
