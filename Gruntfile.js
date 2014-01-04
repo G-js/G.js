@@ -11,7 +11,8 @@ module.exports = function(grunt) {
                 "src/boot.js",
                 "src/deferred.js",
                 "src/loader.js",
-                "src/util.js"
+                "src/util.js",
+                "test"
             ]
         },
         concat: {
