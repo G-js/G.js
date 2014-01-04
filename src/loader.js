@@ -63,7 +63,7 @@
         }
 
         require.resolve = function ( id ) {
-            if ( config.alias[id] ) {
+            if ( config.alias && config.alias[id] ) {
                 return config.alias[id];
             }
 
@@ -373,10 +373,17 @@
     // convert dep string to module object, and fetch if not loaded
     function resolveDeps ( deps, context ) {
         var require = Require( context );
-        var modules = deps.map( function (dep) {
+        var modules;
+        var toFetch;
+
+        if (!Array.isArray(deps)) {
+            deps = [deps];
+        }
+
+        modules = deps.map( function (dep) {
             return Module( require.resolve( dep ) );
         });
-        var toFetch = modules.filter(function ( m ) {
+        toFetch = modules.filter(function ( m ) {
             return m.status < STATUS.FETCHING;
         });
 
