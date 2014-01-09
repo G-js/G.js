@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <script>
+        var src = typeof JSON === 'undefined' ? '../dist/g.js' : '../dist/g-modern.js';
+        var doc = document;
+        var head   = doc.head ||
+             doc.getElementsByTagName( 'head' )[0] ||
+             doc.documentElement;
+        var script = document.createElement( 'SCRIPT' );
+        var done = false;
+        script.setAttribute( 'type', "text/javascript" );
+        script.setAttribute( 'charset', 'utf-8' );
+        script.setAttribute( 'src', src );
+        script.setAttribute( 'async', true );
+
+        script.onload = script.onreadystatechange = function(){
+            if ( !done &&
+                    ( !this.readyState ||
+                       this.readyState === "loaded" ||
+                       this.readyState === "complete" )
+            ){
+                // clear
+                done = true;
+                script.onload = script.onreadystatechange = null;
+                G.config('baseUrl', window.location.href.replace(/index\.html.*/, ''));
+
+                G.use('test', function (test) {
+                    test.run();
+                });
+            }
+        };
+
+
+        head.appendChild( script );
+        </script>
+        <style>
+            .bd {
+                height: 500px;
+                border: 1px solid black;
+                overflow: scroll;
+            }
+            #pass, #fail {
+                margin: 0 5px;
+            }
+            #pass, .pass{
+                color: green;
+            }
+            #fail, .fail{
+                color: red;
+            }
+        </style>
+    </head>
+    <body>
+    <div>
+        <div class="hd">
+            <h1>Test Suite for G.js</h1>
+            <label>Pass:<span id="pass">0</span></label>
+            <label>Fail:<span id="fail">0</span></label>
+        </div>
+        <div id="reportBoard" class="bd"></div>
+    </div>
+
+    </body>
+</html>

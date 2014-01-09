@@ -1,0 +1,1 @@
+define('path/to/a/a.js', {name: "a"});

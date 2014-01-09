@@ -1,67 +1,49 @@
 var G = this.G = {};
-
-(function () {
+(function (G) {
     var config = {};
     G.config = function ( key, value ) {
-        if ( !arguments.length ) {
+        if ( ! arguments.length ) {
             return config;
         } else if ( arguments.length === 2 ) {
-            G.config.set( key, value );
-        } else if ( Array.isArray(key) || typeof key === 'string' ) {
-            return G.config.get( key );
+            config[ key ] = value;
         } else if ( typeof key === 'object' ) {
-            Object.keys( key ).forEach(function ( k ) {
-                G.config.set( k, key[k] );
+            Object.keys( key ).forEach(function (k) {
+                config[ k ] = key[ k ];
             });
+        } else {
+            return config[ key ];
         }
     };
-    G.config.set = function ( key, value ) {
-        var host = config;
-        if ( Array.isArray( key ) ) {
-            var tmp = key;
-            key = tmp.pop();
-            tmp.forEach(function ( k ) {
-                if ( !host[k] ) {
-                    host[k] = {};
-                }
-                host = host[k];
-            });
-        }
-        host[key] = value;
-    };
-    G.config.get = function ( key ) {
-        if ( !key ) {
-            return config;
-        }
-        var host = config;
-        if ( Array.isArray( key ) ) {
-            var len = key.length, i;
-            for ( i = 0; i <= len - 2; i++) {
-                if ( host[key[i]] ) {
-                    host = host[key[i]];
-                } else {
-                    return host[key[i]];
-                }
-            }
-            key = key[len-1];
-        }
-        return host[key];
-    };
-})();
-
-G.log = function (data) {
-    if (G.config.debug && typeof console != 'undefined' && console.log){
-        console.log(data);
-    }
-};
+})(G);
 (function (G) {
     var util = G.util = {};
-
-    /******  Path  ******/
     var MULTIPLE_SLASH_RE = /([^:\/])\/\/+/g;
     var DIRNAME_RE = /.*(?=\/.*$)/;
 
     util.path ={
+        idToUrl: function ( id ) {
+            var url, version, now;
+            if ( util.path.isAbsolute( id ) ) {
+                return id;
+            }
+
+            version = G.config( 'version' );
+
+            if (version) {
+                if ( ! version[ id ] ) {
+                    now = Date.now();
+                    version = now -  ( now % G.config( 'cacheExpire' ) );
+                } else {
+                    version = version[ id ];
+                }
+
+                url = id.replace( /\.(\w*)$/, '-' + version + '.$1');
+            } else {
+                url = id;
+            }
+
+            return util.path.realpath( G.config('baseUrl') + url );
+        },
         dirname: function ( url ) {
             var match = url.match(DIRNAME_RE);
             return (match ? match[0] : '.') + '/';
@@ -234,6 +216,39 @@ G.when = function ( defers ){
     return ret.promise();
 };
 })( G );
+(function (G) {
+    var loaders = [];
+
+    G.Loader = {
+        register: function (re, loader) {
+            var fn = function (url) {
+                if (re.test(url)) {
+                    return loader;
+                }
+
+                return false;
+            };
+
+            loaders.push(fn);
+        },
+        match: function (url) {
+            var i = 0;
+            var match;
+
+            do {
+                match = loaders[i](url);
+
+                if (match) {
+                    break;
+                }
+
+                i ++;
+            } while (i < loaders.length);
+
+            return match;
+        }
+    };
+})(G);
 // Thanks To:
 //      - My girlfriend
 //      - http://github.com/seajs/seajs
@@ -251,23 +266,17 @@ G.when = function ( defers ){
         'COMPILED'  : 7     // The module is compiled and module.exports is available.
     };
 
-    var doc    = document;
-    var head   = doc.head ||
-                 doc.getElementsByTagName('head')[0] ||
-                 doc.documentElement;
     var config = G.config();
-    var moduleCount = 0;
+    var guid   = 0;
+    var holdRequest = 0;
 
     function use ( deps, cb ) {
-        var module = Module( 'module_' + (moduleCount++) );
+        var module = Module.getOrCreate( 'module_' + (guid++) );
         var id     = module.id;
+
         module.isAnonymous = true;
-        deps = resolveDeps( deps, this.context );
 
-        module.dependencies = deps;
-        module.factory = cb;
-
-        Module.wait( module );
+        Module.save( id, deps, cb, this.context );
 
         return Module.defers[id].promise();
     }
@@ -276,30 +285,35 @@ G.when = function ( defers ){
         return use.call({context: window.location.href}, deps, cb);
     };
 
-    var define = global.define = function ( id, deps, fn ) {
+    global.define = function ( id, deps, fn ) {
         if (typeof id !== 'string') {
-            throw 'ID must be a string';
+            throw new Error( 'ID must be a string' );
         }
         if (!fn) {
             fn = deps;
             deps = [];
         }
-        return Module.save(id, deps, fn);
+
+        if (Module.cache[ id ] && Module.cache[ id ].status >= STATUS.SAVED) {
+            return;
+        }
+
+        return Module.save( id, deps, fn, id );
     };
-    define.amd = {};
 
     function Require ( context ) {
         context = context || window.location.href;
+
         function require ( id ) {
             id = require.resolve( id );
             if ( !Module.cache[id] || Module.cache[id].status !== STATUS.COMPILED ) {
-                throw new Error( 'This module is not found:' + id );
+                throw new Error( 'Module not found:' + id );
             }
             return Module.cache[id].exports;
         }
 
         require.resolve = function ( id ) {
-            if ( config.alias[id] ) {
+            if ( config.alias && config.alias[id] ) {
                 return config.alias[id];
             }
 
@@ -332,8 +346,17 @@ G.when = function ( defers ){
         return require;
     }
 
-    // Get or Create a module object
-    function Module (id) {
+    G.Require = Require;
+
+    var Module = {};
+
+    Module.cache = {};
+    Module.defers = {};
+    Module.queue = [];
+    Module.holdedRequest = [];
+    Module.STATUS = STATUS;
+
+    Module.getOrCreate = function (id) {
         if ( !Module.cache[id] ) {
             Module.cache[id]  = {
                 id           : id,
@@ -343,26 +366,23 @@ G.when = function ( defers ){
             Module.defers[id] = G.Deferred();
         }
         return Module.cache[id];
-    }
-
-    Module.cache = {};
-    Module.defers = {};
-    Module.queue = [];
+    };
 
     Module.wait  = function ( module ) {
         var deps = module.dependencies.map( function ( dep ) {
             return Module.defers[dep.id];
         } );
+
         G.when( deps )
             .done( function () {
-                Module.ready( module );
+                Module.compile( module );
             } )
             .fail( function (msg) {
                 Module.fail( module, new Error( msg ) );
             } );
     };
 
-    Module.ready = function ( module ) {
+    Module.compile = function ( module ) {
         var deps, exports;
         module.status = STATUS.READY;
 
@@ -387,22 +407,26 @@ G.when = function ( defers ){
                             Module.defers[module.id].resolve(module.exports);
                         };
                     };
-                    Module.defers[module.id].done( function () {
+
+                    Module.defers[module.id].always( function () {
                         delete module.async;
                     });
-                    exports = module.factory.call( window, Require( module.id ), module.exports, module );
+
+                    exports = module.factory.call( window, new Require( module.id ), module.exports, module );
+
                     if (exports) {
                         module.exports = exports;
                     }
                 }
             } catch (ex) {
                 module.status = STATUS.ERROR;
-                Module.fail( module, ex);
+                Module.fail( module, ex );
                 throw ex;
             }
         } else {
             module.exports = module.factory;
         }
+
         if ( module.status !== STATUS.PAUSE ) {
             module.status = STATUS.COMPILED;
             Module.defers[module.id].resolve(module.exports);
@@ -410,30 +434,52 @@ G.when = function ( defers ){
     };
 
     Module.fail  = function ( module, err ) {
-        G.log( 'MOD: '+module.id );
-        G.log( 'DEP: '+module.dependencies.map( function ( dep ) {
-            return dep.id;
-        } ) );
-        G.log( 'ERR: '+err.message );
-        Module.defers[module.id].reject();
+        Module.defers[module.id].reject(err);
         throw err;
     };
 
     Module.fetch = function ( module ) {
-        var id     = module.id;
-        module.url = getAbsoluteUrl( id );
+        var loader = G.Loader.match( module.id ) || G.Loader.match('.js');
 
-        // always try .js ext
-        var ext = getExt( module.url ) || '.js';
-        var loader = Module.Plugin.Loaders[ext] || Module.Plugin.Loaders['.js'];
+        module.url = util.path.idToUrl( module.id );
 
-        loader( module, config );
+        loader.call( {
+            fail: function ( err ) {
+                Module.fail( module, err );
+            },
+            compile: function () {
+                Module.compile( module );
+            },
+            onLoad: function () {
+                if ( Module.queue.length ) {
+                    Module.queue
+                        .filter(function (module) {
+                            return module.status < STATUS.FETCHING;
+                        })
+                        .forEach( Module.fetch );
+                    Module.queue = [];
+                }
+            },
+            holdRequest: function () {
+                holdRequest ++;
+            },
+            flushRequest: function () {
+                holdRequest --;
+                Module.holdedRequest
+                    .filter(function ( module ) {
+                        return module.status < STATUS.FETCHING;
+                    })
+                    .forEach( Module.fetch );
+
+                Module.holdedRequest = [];
+            }
+        }, module );
     };
 
-    Module.save = function ( id, deps, fn ) {
-        var module = Module( id );
+    Module.save = function ( id, deps, fn, context ) {
+        var module = Module.getOrCreate( id );
 
-        deps = resolveDeps( deps, id );
+        deps = resolveDeps( deps, context );
 
         module.dependencies = deps;
         module.factory      = fn;
@@ -443,90 +489,123 @@ G.when = function ( defers ){
     };
 
     Module.remove = function (id) {
-        var module = Module(id);
+        var module = Module.getOrCreate(id);
         delete Module.cache[module.id];
         delete Module.defers[module.id];
     };
 
-    Module.Plugin = {
-        Loaders: {
-            '.js'     : jsLoader,
-            '.css'    : cssLoader,
-            '.cmb.js' : cmbJsLoader
-        }
-    };
+    // convert dep string to module object, and fetch if not loaded
+    function resolveDeps ( deps, context ) {
+        var require = new Require( context );
 
-    // Loaders
-    function cmbJsLoader ( module, config) {
-        var id      = module.id;
-        var combine = config.combine[id];
-
-        if (combine) {
-            if (config.debug) {
-                return define(id, combine);
-            } else {
-                combine = combine.map(function (id) {
-                    return Module(id);
-                });
-                combine.forEach(function (dep) {
-                    if (dep.status < STATUS.FETCHING) {
-                        dep.status = STATUS.FETCHING;
-                    }
-                });
-            }
+        if (!Array.isArray(deps)) {
+            deps = [deps];
         }
 
-        jsLoader(module, config);
+        var modules = deps.map( function (dep) {
+            return Module.getOrCreate( require.resolve( dep ) );
+        });
+
+        var toFetch = modules
+            .filter(function ( m ) {
+                return m.status < STATUS.FETCHING;
+            });
+
+        if (holdRequest) {
+            Module.holdedRequest = Module.holdedRequest.concat( toFetch );
+        } else {
+            toFetch.forEach( Module.fetch );
+        }
+
+        return modules;
     }
 
-    function jsLoader ( module ) {
-        var node  = doc.createElement( "script" );
+    G.Module = Module;
+
+}) (window, G, G.util);
+(function (G) {
+    var doc = document;
+    var head = doc.head || doc.getElementsByTagName( 'head' )[0] || doc.documentElement;
+    var baseElement = head.getElementsByTagName( 'base' )[0];
+    var CMB_RE = /\.cmb\.js$/;
+
+    G.Loader.register(/\.js/, function ( module ) {
+        var self  = this;
+        var isCmb = CMB_RE.test( module.id );
+
+        module.status = G.Module.STATUS.FETCHING;
+
+        if ( isCmb ) {
+            self.holdRequest();
+        }
+
+        loadScript( module.url, function (err) {
+            if (err) {
+                self.fail( err );
+            } else {
+                if (module.status === G.Module.STATUS.FETCHING) {
+                    module.status = G.Module.STATUS.FETCHED;
+                }
+
+                if ( module.status > 0 && module.status < G.Module.STATUS.SAVED ) {
+                    self.compile();
+                }
+                if ( isCmb ) {
+                    self.flushRequest();
+                }
+
+                self.onLoad();
+            }
+        } );
+    });
+
+    function loadScript (url, callback) {
+        var node  = doc.createElement( 'script' );
         var done  = false;
         var timer = setTimeout( function () {
             head.removeChild( node );
-            Module.fail( module, 'Load timeout' );
+            callback( new Error( 'Load timeout' ) );
         }, 30000 ); // 30s
 
-        node.setAttribute( 'type', "text/javascript" );
+        node.setAttribute( 'type', 'text/javascript' );
         node.setAttribute( 'charset', 'utf-8' );
-        node.setAttribute( 'src', module.url );
+        node.setAttribute( 'src', url );
         node.setAttribute( 'async', true );
 
         node.onload = node.onreadystatechange = function(){
             if ( !done &&
                     ( !this.readyState ||
-                       this.readyState === "loaded" ||
-                       this.readyState === "complete" )
+                       this.readyState === 'loaded' ||
+                       this.readyState === 'complete' )
             ){
                 // clear
                 done = true;
                 clearTimeout( timer );
                 node.onload = node.onreadystatechange = null;
 
-                if (module.status === STATUS.FETCHING) {
-                    module.status = STATUS.FETCHED;
-                }
-
-                if ( module.status > 0 && module.status < STATUS.SAVED ) {
-                    G.log( module.id + ' is not a module' );
-                    Module.ready( module );
-                }
+                callback();
             }
         };
 
         node.onerror = function(){
             clearTimeout( timer );
             head.removeChild( node );
-            Module.fail( module, new Error( 'Load Fail' ) );
+            callback( new Error( 'Load Fail' ) );
         };
-        module.status = STATUS.FETCHING;
-        head.appendChild( node );
+
+        baseElement ?
+            head.insertBefore(node, baseElement) :
+            head.appendChild(node);
     }
+})(G);
+(function (G) {
+    var doc = document;
+    var head = doc.head || doc.getElementsByTagName('head')[0] || doc.documentElement;
 
     // `onload` event is supported in WebKit since 535.23
     // Ref:
     //  - https://bugs.webkit.org/show_activity.cgi?id=38995
-    var isOldWebKit = +navigator.userAgent.replace(/.*AppleWebKit\/(\d+)\..*/, "$1") < 536;
+    var isOldWebKit = +navigator.userAgent.replace(/.*AppleWebKit\/(\d+)\..*/, '$1') < 536;
 
     // `onload/onerror` event is supported since Firefox 9.0
     // Ref:
@@ -535,10 +614,11 @@ G.when = function ( defers ){
     var isOldFirefox = window.navigator.userAgent.indexOf('Firefox') > 0 &&
         !('onload' in document.createElement('link'));
 
-    function cssLoader ( module ) {
-        var node = doc.createElement( "link" );
+    G.Loader.register(/\.css/, function ( module ) {
+        var self = this;
+        var node = doc.createElement( 'link' );
         var timer;
-        node.setAttribute( 'type', "text/css" );
+        node.setAttribute( 'type', 'text/css' );
         node.setAttribute( 'href', module.url );
         node.setAttribute( 'rel', 'stylesheet' );
 
@@ -547,7 +627,7 @@ G.when = function ( defers ){
             node.onerror = function () {
                 clearTimeout( timer );
                 head.removeChild( node );
-                Module.fail( module, new Error( 'Load Fail' ) );
+                self.fail( new Error( 'Load Fail' ) );
             };
         } else {
             setTimeout(function() {
@@ -555,20 +635,20 @@ G.when = function ( defers ){
             }, 0); // Begin after node insertion
         }
 
-        module.status = STATUS.FETCHING;
+        module.status = G.STATUS.FETCHING;
         head.appendChild(node);
 
         timer = setTimeout(function () {
             head.removeChild(node);
-            Module.fail( module, new Error( 'Load timeout' ) );
+            self.fail( new Error( 'Load timeout' ) );
         }, 30000); // 30s
 
         function onCSSLoad() {
             clearTimeout( timer );
-            if (module.status === STATUS.FETCHING) {
-                module.status = STATUS.FETCHED;
+            if (module.status === G.STATUS.FETCHING) {
+                module.status = G.STATUS.FETCHED;
             }
-            Module.ready( module );
+            self.done();
         }
 
         function poll(node, callback) {
@@ -604,81 +684,5 @@ G.when = function ( defers ){
         }
 
         return node;
-    }
-
-    // convert dep string to module object, and fetch if not loaded
-    function resolveDeps ( deps, context ) {
-        var require = Require( context );
-        var modules = deps.map( function (dep) {
-            return Module( require.resolve( dep ) );
-        });
-        var toFetch = modules.filter(function ( m ) {
-            return m.status < STATUS.FETCHING;
-        });
-
-        toFetch.forEach( Module.fetch );
-
-        return modules;
-    }
-
-    // convers id to absolute url
-    function getAbsoluteUrl ( id ) {
-        var url = id;
-        if ( util.path.isAbsolute( id ) ) {
-            return id;
-        }
-        if ( config.version ) {
-            var v = Date.now();
-
-            if (config.version[id]) {
-                v = config.version[id];
-            } else {
-                v -= v % config.cacheExpire;
-            }
-            if (config.versionTemplate) {
-                var m = /(\.(js|css|html?|swf|gif|png|jpe?g))$/i.exec(id);
-                if (!m) {
-                    m = m[0];
-                } else {
-                    m = '.js';
-                }
-
-                url = config.versionTemplate({
-                    version: v,
-                    url: {
-                        href: id,
-                        ext: m
-                    }
-                });
-            } else {
-                url = id.replace(/(\.(js|css|html?|swf|gif|png|jpe?g))$/i, '-' + v +"$1");
-            }
-        }
-
-        return util.path.realpath( G.config('baseUrl') + url );
-    }
-
-    function getExt ( url ) {
-        var arr = url.split('.');
-        if ( arr.length > 1 ) {
-            return "." + arr[arr.length-1];
-        }
-    }
-    G.Module = {
-        cache: Module.cache,
-        queue: Module.queue,
-        remove: Module.remove
-    };
-
-    define( 'Promise', [], function () {
-        return {
-            when: G.when,
-            defer: G.Deferred
-        };
     });
-    define( 'util', [], G.util );
-    define( 'config', [], G.config() );
-    define( 'require', [], function () {
-        return Require(window.location.href);
-    });
-}) (window, G, G.util);
+})(G);
