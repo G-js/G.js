@@ -1,7 +1,7 @@
 define('specs/module/define/task.js', ['test.js'], function (require, exports, module) {
     var test = require('test.js');
 
-    module.exports = test.task('AMD', function (done) {
+    module.exports = test.task('define', function (done) {
         require.async(['./a', './b', './c', './d', './e', './f'], function (a, b, c, d, e, f) {
             test.assert(a.name === 'a', 'define(id, obj);');
             test.assert(b.name === 'b', 'define(id, deps, obj);');

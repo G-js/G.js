@@ -1,8 +1,8 @@
 define('meta.js', [], function () {
     return [
         'specs/config',
-        'specs/module'
-        // 'specs/module',
+        'specs/module',
+        'specs/loader'
         // 'specs/util'
     ];
 });
