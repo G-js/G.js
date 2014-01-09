@@ -1,0 +1,1 @@
+define('specs/module/define/b.js', [], {name: 'b'});

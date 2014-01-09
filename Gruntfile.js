@@ -10,8 +10,9 @@ module.exports = function(grunt) {
             all: [
                 "src/boot.js",
                 "src/deferred.js",
-                "src/loader.js",
-                "src/util.js"
+                "src/main.js",
+                "src/util.js",
+                "test"
             ]
         },
         concat: {
@@ -21,15 +22,23 @@ module.exports = function(grunt) {
                         "src/es5-safe.js",
                         "src/json2.js",
                         "src/boot.js",
+                        "src/config.js",
                         "src/util.js",
                         "src/deferred.js",
-                        "src/loader.js"
+                        "src/loader.js",
+                        "src/module.js",
+                        "src/loader/amd.js",
+                        "src/loader/css.js"
                     ],
                     'dist/g-modern.js': [
                         "src/boot.js",
+                        "src/config.js",
                         "src/util.js",
                         "src/deferred.js",
-                        "src/loader.js"
+                        "src/loader.js",
+                        "src/module.js",
+                        "src/loader/amd.js",
+                        "src/loader/css.js"
                     ]
                 }
             },

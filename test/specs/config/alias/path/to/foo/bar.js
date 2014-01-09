@@ -1,0 +1,1 @@
+define('specs/config/alias/path/to/foo/bar.js', {name: 'foo/bar'});

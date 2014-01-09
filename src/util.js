@@ -1,11 +1,32 @@
 (function (G) {
     var util = G.util = {};
-
-    /******  Path  ******/
     var MULTIPLE_SLASH_RE = /([^:\/])\/\/+/g;
     var DIRNAME_RE = /.*(?=\/.*$)/;
 
     util.path ={
+        idToUrl: function ( id ) {
+            var url, version, now;
+            if ( util.path.isAbsolute( id ) ) {
+                return id;
+            }
+
+            version = G.config( 'version' );
+
+            if (version) {
+                if ( ! version[ id ] ) {
+                    now = Date.now();
+                    version = now -  ( now % G.config( 'cacheExpire' ) );
+                } else {
+                    version = version[ id ];
+                }
+
+                url = id.replace( /\.(\w*)$/, '-' + version + '.$1');
+            } else {
+                url = id;
+            }
+
+            return util.path.realpath( G.config('baseUrl') + url );
+        },
         dirname: function ( url ) {
             var match = url.match(DIRNAME_RE);
             return (match ? match[0] : '.') + '/';
