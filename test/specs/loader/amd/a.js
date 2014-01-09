@@ -1,0 +1,1 @@
+define('specs/loader/amd/a.js', {name: 'a'});
