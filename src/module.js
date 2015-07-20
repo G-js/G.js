@@ -1,7 +1,3 @@
-// Thanks To:
-//      - My girlfriend
-//      - http://github.com/seajs/seajs
-
 (function ( global, G, util ) {
     var STATUS = {
         'ERROR'     : -2,   // The module throw an error while compling
@@ -17,31 +13,48 @@
 
     var config = G.config();
     var guid   = 0;
-    var holdRequest = 0;
 
-    function use ( deps, cb ) {
+    function use ( deps, cb, context ) {
         var module = Module.getOrCreate( 'module_' + (guid++) );
         var id     = module.id;
+        var defer  = G.Deferred();
 
         module.isAnonymous = true;
 
-        Module.save( id, deps, cb, this.context );
+        if (!Array.isArray(deps)) {
+            deps = [deps];
+        }
 
-        return Module.defers[id].promise();
+        Module.save( id, deps, cb, context );
+
+        Module.defers[id]
+            .done(function () {
+                defer.resolve.apply(defer, module.dependencies.map(function (dep) {
+                    return dep.exports;
+                }));
+            })
+            .fail(function (err) {
+                defer.reject(err);
+            });
+
+        return defer.promise();
     }
 
     G.use = function (deps, cb) {
-        return use.call({context: window.location.href}, deps, cb);
+        return use( deps, cb, window.location.href );
     };
 
     global.define = function ( id, deps, fn ) {
         if (typeof id !== 'string') {
-            throw new Error( 'ID must be a string' );
+            throw new Error( 'module.id must be a string' );
         }
+
         if (!fn) {
             fn = deps;
             deps = [];
         }
+
+        delete G.Loader.buffer[ id ];
 
         if (Module.cache[ id ] && Module.cache[ id ].status >= STATUS.SAVED) {
             return;
@@ -85,7 +98,7 @@
         };
 
         require.async = function (deps, cb) {
-            return use.call({context: context}, deps, cb);
+            return use( deps, cb, context );
         };
 
         // TODO: implement require.paths
@@ -101,8 +114,6 @@
 
     Module.cache = {};
     Module.defers = {};
-    Module.queue = [];
-    Module.holdedRequest = [];
     Module.STATUS = STATUS;
 
     Module.getOrCreate = function (id) {
@@ -115,20 +126,6 @@
             Module.defers[id] = G.Deferred();
         }
         return Module.cache[id];
-    };
-
-    Module.wait  = function ( module ) {
-        var deps = module.dependencies.map( function ( dep ) {
-            return Module.defers[dep.id];
-        } );
-
-        G.when( deps )
-            .done( function () {
-                Module.compile( module );
-            } )
-            .fail( function (msg) {
-                Module.fail( module, new Error( msg ) );
-            } );
     };
 
     Module.compile = function ( module ) {
@@ -187,54 +184,44 @@
         throw err;
     };
 
-    Module.fetch = function ( module ) {
-        var loader = G.Loader.match( module.id ) || G.Loader.match('.js');
-
-        module.url = util.path.idToUrl( module.id );
-
-        loader.call( {
-            fail: function ( err ) {
-                Module.fail( module, err );
-            },
-            compile: function () {
-                Module.compile( module );
-            },
-            onLoad: function () {
-                if ( Module.queue.length ) {
-                    Module.queue
-                        .filter(function (module) {
-                            return module.status < STATUS.FETCHING;
-                        })
-                        .forEach( Module.fetch );
-                    Module.queue = [];
-                }
-            },
-            holdRequest: function () {
-                holdRequest ++;
-            },
-            flushRequest: function () {
-                holdRequest --;
-                Module.holdedRequest
-                    .filter(function ( module ) {
-                        return module.status < STATUS.FETCHING;
-                    })
-                    .forEach( Module.fetch );
-
-                Module.holdedRequest = [];
-            }
-        }, module );
-    };
-
     Module.save = function ( id, deps, fn, context ) {
         var module = Module.getOrCreate( id );
+        var require = new Require( context );
 
-        deps = resolveDeps( deps, context );
+        var deps = deps.map( function (dep) {
+            return Module.getOrCreate( require.resolve( dep ) );
+        });
 
         module.dependencies = deps;
         module.factory      = fn;
         module.status       = STATUS.SAVED;
 
-        Module.wait( module );
+        deps = deps.map( function ( dep ) {
+            if (dep.status < STATUS.FETCHING) {
+                dep.status = STATUS.FETCHING;
+
+                dep.url = util.path.map( util.path.idToUrl( dep.id ) );
+
+                G.Loader.buffer[dep.id] = dep;
+            }
+
+            return Module.defers[dep.id];
+        } );
+
+        G.when( deps )
+            .done( function () {
+                Module.compile( module );
+            } )
+            .fail( function ( err ) {
+                Module.fail( module, err );
+            } );
+
+        // 将`G.Loader.dispatch`延迟到`script`标签的onLoad之后，
+        // 以避免一个`script`标签内多个`define`带来的依赖重复加载问题
+        // https://github.com/amdjs/amdjs-api/blob/master/AMD.md#transporting-more-than-one-module-at-a-time-
+        setTimeout(function () {
+            G.Loader.dispatch();
+        }, 0);
     };
 
     Module.remove = function (id) {
@@ -242,32 +229,6 @@
         delete Module.cache[module.id];
         delete Module.defers[module.id];
     };
-
-    // convert dep string to module object, and fetch if not loaded
-    function resolveDeps ( deps, context ) {
-        var require = new Require( context );
-
-        if (!Array.isArray(deps)) {
-            deps = [deps];
-        }
-
-        var modules = deps.map( function (dep) {
-            return Module.getOrCreate( require.resolve( dep ) );
-        });
-
-        var toFetch = modules
-            .filter(function ( m ) {
-                return m.status < STATUS.FETCHING;
-            });
-
-        if (holdRequest) {
-            Module.holdedRequest = Module.holdedRequest.concat( toFetch );
-        } else {
-            toFetch.forEach( Module.fetch );
-        }
-
-        return modules;
-    }
 
     G.Module = Module;
 

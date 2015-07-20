@@ -87,6 +87,7 @@ G.Deferred = function () {
 
     function dispatch(cbs) {
         /*jshint loopfunc:true*/
+        var cb;
         while( (cb = cbs.shift()) || (cb = callbacks.always.shift()) ) {
             setTimeout( (function ( fn ) {
                 return function () {
@@ -106,19 +107,21 @@ G.when = function ( defers ){
     var ret     = G.Deferred();
     var len     = defers.length;
     var count   = 0;
+    var results = [];
 
     if (!len) {
         return ret.resolve().promise();
     }
 
-    defers.forEach(function (defer) {
+    defers.forEach(function (defer, i) {
         defer
-            .fail(function () {
-                ret.reject();
+            .fail(function (err) {
+                ret.reject(err);
             })
-            .done(function () {
+            .done(function (result) {
+                results[i] = result;
                 if (++count === len) {
-                    ret.resolve();
+                    ret.resolve.apply(ret, results);
                 }
             });
     });
